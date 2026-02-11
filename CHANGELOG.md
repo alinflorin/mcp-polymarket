@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.16
+
+### Patch Changes
+
+- 0f1d89f: Fix npm compatibility by replacing JSR protocol dependency
+
+  - Replace `jsr:@hk/polymarket` with npm-compatible `@jsr/hk__polymarket` package
+  - Fix `EUNSUPPORTEDPROTOCOL` error when installing with npm/npx
+  - Enable installation with all package managers (npm, pnpm, yarn) without JSR-specific syntax
+
 ## 0.0.15
 
 ### Patch Changes
