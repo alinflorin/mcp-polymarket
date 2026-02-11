@@ -84,7 +84,10 @@ export class PolymarketTrading {
 		const cfg = getConfig(this.config);
 		// Use StaticJsonRpcProvider to completely skip network auto-detection
 		// This prevents "could not detect network" errors from flaky RPCs
-		const provider = new providers.StaticJsonRpcProvider(cfg.rpcUrl, cfg.chainId);
+		const provider = new providers.StaticJsonRpcProvider(
+			cfg.rpcUrl,
+			cfg.chainId,
+		);
 		const ethersSigner = new Wallet(this.config.privateKey, provider);
 		this.signer = ethersSigner;
 		const host = cfg.host;

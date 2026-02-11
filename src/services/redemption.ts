@@ -56,7 +56,10 @@ export class PolymarketRedemption {
 			);
 		}
 		// Use StaticJsonRpcProvider to completely skip network auto-detection
-		this.provider = new providers.StaticJsonRpcProvider(cfg.rpcUrl, cfg.chainId);
+		this.provider = new providers.StaticJsonRpcProvider(
+			cfg.rpcUrl,
+			cfg.chainId,
+		);
 		this.signer = signer ?? new Wallet(cfg.privateKey, this.provider);
 	}
 

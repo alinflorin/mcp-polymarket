@@ -442,8 +442,7 @@ function renderSchema(jsonSchema) {
 			: (prop.type ?? "unknown");
 		const requiredStr = required.has(key) ? "✅" : "";
 		const description = prop.description ?? "";
-		const defaultVal =
-			prop.default !== undefined ? String(prop.default) : "";
+		const defaultVal = prop.default !== undefined ? String(prop.default) : "";
 
 		if (hasDefaults) {
 			table += `| \`${key}\` | ${type} | ${requiredStr} | ${defaultVal} | ${description} |\n`;
