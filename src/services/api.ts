@@ -1,4 +1,4 @@
-import { GammaSDK, PolymarketSDK } from "@hk/polymarket";
+import { GammaSDK, PolymarketSDK } from "@jsr/hk__polymarket";
 import type { OrderBookSummary } from "@polymarket/clob-client";
 import { type BaseConfig, getConfig } from "./config.js";
 
