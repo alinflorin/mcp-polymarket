@@ -57,7 +57,7 @@ export class PolymarketApprovals {
 		const overrides = {
 			nonce,
 			maxFeePerGas: utils.parseUnits("250", "gwei"),
-			maxPriorityFeePerGas: utils.parseUnits("30", "gwei"),
+			maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
 			gasLimit: 200_000,
 		};
 
@@ -187,37 +187,37 @@ export class PolymarketApprovals {
 		const approvals = [
 			{
 				key: "USDC_ALLOWANCE_FOR_CTF",
-				fn: () => usdc.approve(CTF_ADDRESS, constants.MaxUint256),
+				fn: (o: providers.TransactionRequest) => usdc.approve(CTF_ADDRESS, constants.MaxUint256, o),
 				label: "USDC→CTF",
 			},
 			{
 				key: "USDC_ALLOWANCE_FOR_EXCHANGE",
-				fn: () => usdc.approve(EXCHANGE_ADDRESS, constants.MaxUint256),
+				fn: (o: providers.TransactionRequest) => usdc.approve(EXCHANGE_ADDRESS, constants.MaxUint256, o),
 				label: "USDC→Exchange",
 			},
 			{
 				key: "CTF_APPROVAL_FOR_EXCHANGE",
-				fn: () => ctf.setApprovalForAll(EXCHANGE_ADDRESS, true),
+				fn: (o: providers.TransactionRequest) => ctf.setApprovalForAll(EXCHANGE_ADDRESS, true, o),
 				label: "CTF→Exchange",
 			},
 			{
 				key: "USDC_ALLOWANCE_FOR_NEG_RISK_EXCHANGE",
-				fn: () => usdc.approve(NEG_RISK_EXCHANGE_ADDRESS, constants.MaxUint256),
+				fn: (o: providers.TransactionRequest) => usdc.approve(NEG_RISK_EXCHANGE_ADDRESS, constants.MaxUint256, o),
 				label: "USDC→NegRiskExchange",
 			},
 			{
 				key: "USDC_ALLOWANCE_FOR_NEG_RISK_ADAPTER",
-				fn: () => usdc.approve(NEG_RISK_ADAPTER_ADDRESS, constants.MaxUint256),
+				fn: (o: providers.TransactionRequest) => usdc.approve(NEG_RISK_ADAPTER_ADDRESS, constants.MaxUint256, o),
 				label: "USDC→NegRiskAdapter",
 			},
 			{
 				key: "CTF_APPROVAL_FOR_NEG_RISK_EXCHANGE",
-				fn: () => ctf.setApprovalForAll(NEG_RISK_EXCHANGE_ADDRESS, true),
+				fn: (o: providers.TransactionRequest) => ctf.setApprovalForAll(NEG_RISK_EXCHANGE_ADDRESS, true, o),
 				label: "CTF→NegRiskExchange",
 			},
 			{
 				key: "CTF_APPROVAL_FOR_NEG_RISK_ADAPTER",
-				fn: () => ctf.setApprovalForAll(NEG_RISK_ADAPTER_ADDRESS, true),
+				fn: (o: providers.TransactionRequest) => ctf.setApprovalForAll(NEG_RISK_ADAPTER_ADDRESS, true, o),
 				label: "CTF→NegRiskAdapter",
 			},
 		] as const;
