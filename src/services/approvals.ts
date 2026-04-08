@@ -56,7 +56,8 @@ export class PolymarketApprovals {
 	): Promise<string> {
 		const overrides = {
 			nonce,
-			gasPrice: utils.parseUnits("100", "gwei"),
+			maxFeePerGas: utils.parseUnits("250", "gwei"),
+			maxPriorityFeePerGas: utils.parseUnits("30", "gwei"),
 			gasLimit: 200_000,
 		};
 
