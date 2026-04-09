@@ -3,7 +3,7 @@
  * Handles redemption of resolved market positions on Polymarket
  */
 
-import { type BigNumber, Contract, providers, Wallet } from "ethers";
+import { type BigNumber, Contract, providers, utils, Wallet } from "ethers";
 import { getConfig, POLYGON_ADDRESSES } from "./config.js";
 
 // Parent collection ID for Polymarket (constant)
@@ -227,6 +227,8 @@ export class PolymarketRedemption {
 				const negRiskAdapter = this.getNegRiskAdapterContract();
 				tx = await negRiskAdapter.redeemPositions(conditionIdBytes32, amounts, {
 					gasLimit: 300_000,
+					maxFeePerGas: utils.parseUnits("250", "gwei"),
+					maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
 				});
 			} else {
 				// For regular CTF markets
@@ -252,6 +254,8 @@ export class PolymarketRedemption {
 					winningIndexSets,
 					{
 						gasLimit: 300_000,
+						maxFeePerGas: utils.parseUnits("250", "gwei"),
+						maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
 					},
 				);
 			}
