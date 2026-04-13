@@ -28,6 +28,16 @@ const NEG_RISK_ADAPTER_ABI = [
 	"function redeemPositions(bytes32 conditionId, uint256[] amounts)",
 ];
 
+/**
+ * ProxyWallet ABI — the on-chain proxy owned by your EOA.
+ * typeCode: 1 = CALL, 2 = DELEGATECALL
+ */
+const PROXY_WALLET_ABI = [
+	"function proxy(tuple(uint8 typeCode, address to, uint256 value, bytes data)[] calls) payable returns (bytes[] returnValues)",
+];
+
+const CALL_TYPE = 1; // ProxyWalletLib.CallType.CALL
+
 export interface RedeemResult {
 	success: boolean;
 	txHash?: string;
@@ -47,39 +57,50 @@ export interface RedeemParams {
 export class PolymarketRedemption {
 	private signer: Wallet;
 	private provider: providers.JsonRpcProvider;
+	private cfg: ReturnType<typeof getConfig>;
 
 	constructor(signer?: Wallet) {
-		const cfg = getConfig();
-		if (!cfg.privateKey) {
+		this.cfg = getConfig();
+		if (!this.cfg.privateKey) {
 			throw new Error(
 				"POLYMARKET_PRIVATE_KEY environment variable is required for redemption",
 			);
 		}
 		// Use StaticJsonRpcProvider to completely skip network auto-detection
 		this.provider = new providers.StaticJsonRpcProvider(
-			cfg.rpcUrl,
-			cfg.chainId,
+			this.cfg.rpcUrl,
+			this.cfg.chainId,
 		);
-		this.signer = signer ?? new Wallet(cfg.privateKey, this.provider);
+		this.signer = signer ?? new Wallet(this.cfg.privateKey, this.provider);
 	}
 
 	/**
-	 * Get the wallet address (funder/proxy or signer address)
+	 * Whether to route calls through the ProxyWallet contract.
+	 * For POLY_PROXY (sig type 1) with a funderAddress set, all on-chain calls
+	 * must be sent via proxy(calls[]) — direct EOA calls operate on the EOA's
+	 * (empty) token balance, not the proxy wallet's balance.
+	 */
+	private get useProxy(): boolean {
+		return !!(this.cfg.funderAddress && this.cfg.signatureType === 1);
+	}
+
+	/**
+	 * Get the wallet address that actually holds the tokens.
+	 * For proxy wallets this is funderAddress; for EOA it's the signer.
 	 */
 	getWalletAddress(): string {
-		const cfg = getConfig();
-		return cfg.funderAddress ?? this.signer.address;
+		return this.cfg.funderAddress ?? this.signer.address;
 	}
 
 	/**
-	 * Get CTF contract instance
+	 * Get CTF contract instance (read-only calls always go direct).
 	 */
 	private getCtfContract(): Contract {
 		return new Contract(POLYGON_ADDRESSES.CTF_ADDRESS, CTF_ABI, this.signer);
 	}
 
 	/**
-	 * Get NegRiskAdapter contract instance
+	 * Get NegRiskAdapter contract instance.
 	 */
 	private getNegRiskAdapterContract(): Contract {
 		return new Contract(
@@ -90,7 +111,61 @@ export class PolymarketRedemption {
 	}
 
 	/**
-	 * Get CTF token balance for a specific position
+	 * Get ProxyWallet contract instance (the funderAddress proxy).
+	 */
+	private getProxyWalletContract(): Contract {
+		if (!this.cfg.funderAddress) {
+			throw new Error("funderAddress is required for proxy wallet calls");
+		}
+		return new Contract(
+			this.cfg.funderAddress,
+			PROXY_WALLET_ABI,
+			this.signer,
+		);
+	}
+
+	/**
+	 * Send a transaction either directly (EOA) or via the ProxyWallet (sig type 1).
+	 *
+	 * @param targetAddress  The contract to call (CTF or NegRiskAdapter)
+	 * @param calldata       ABI-encoded function call
+	 * @param gasLimit       Gas limit for the call
+	 */
+	private async sendTx(
+		targetAddress: string,
+		calldata: string,
+		gasLimit = 400_000,
+	): Promise<providers.TransactionResponse> {
+		const overrides = {
+			gasLimit,
+			maxFeePerGas: utils.parseUnits("250", "gwei"),
+			maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
+		};
+
+		if (this.useProxy) {
+			const proxyWallet = this.getProxyWalletContract();
+			const calls = [
+				{
+					typeCode: CALL_TYPE,
+					to: targetAddress,
+					value: 0,
+					data: calldata,
+				},
+			];
+			console.log(`📡 Routing redemption through ProxyWallet (${this.cfg.funderAddress})`);
+			return proxyWallet.proxy(calls, overrides);
+		}
+
+		// Direct EOA call
+		return this.signer.sendTransaction({
+			to: targetAddress,
+			data: calldata,
+			...overrides,
+		});
+	}
+
+	/**
+	 * Get CTF token balance for a specific position.
 	 */
 	async getCTFBalance(tokenId: string): Promise<bigint> {
 		const ctf = this.getCtfContract();
@@ -100,7 +175,7 @@ export class PolymarketRedemption {
 	}
 
 	/**
-	 * Check if a market condition has been resolved
+	 * Check if a market condition has been resolved.
 	 */
 	async isMarketResolved(conditionId: string): Promise<boolean> {
 		const ctf = this.getCtfContract();
@@ -111,22 +186,19 @@ export class PolymarketRedemption {
 	}
 
 	/**
-	 * Get winning outcome index sets for a resolved binary market
-	 * Returns array of index sets where payout numerator > 0
-	 * For binary markets: [1] for first outcome won, [2] for second outcome won
+	 * Get winning outcome index sets for a resolved binary market.
+	 * Returns array of index sets where payout numerator > 0.
+	 * For binary markets: [1] for first outcome won, [2] for second outcome won.
 	 */
 	async getWinningIndexSets(conditionId: string): Promise<bigint[]> {
 		const ctf = this.getCtfContract();
 		const conditionIdBytes32 = this.formatConditionId(conditionId);
 
-		// Get payout numerators for both outcomes (0 and 1)
 		const [numerator0, numerator1]: [BigNumber, BigNumber] = await Promise.all([
 			ctf.payoutNumerators(conditionIdBytes32, 0),
 			ctf.payoutNumerators(conditionIdBytes32, 1),
 		]);
 
-		// Build array of winning index sets
-		// Index set 1 = outcome 0, Index set 2 = outcome 1
 		const winningIndexSets: bigint[] = [];
 		if (numerator0.gt(0)) winningIndexSets.push(1n);
 		if (numerator1.gt(0)) winningIndexSets.push(2n);
@@ -135,7 +207,7 @@ export class PolymarketRedemption {
 	}
 
 	/**
-	 * Check if NegRiskAdapter is approved to spend CTF tokens
+	 * Check if NegRiskAdapter is approved to spend CTF tokens.
 	 */
 	async isNegRiskAdapterApproved(): Promise<boolean> {
 		const ctf = this.getCtfContract();
@@ -147,15 +219,15 @@ export class PolymarketRedemption {
 	}
 
 	/**
-	 * Format condition ID as bytes32
+	 * Format condition ID as bytes32.
 	 */
 	private formatConditionId(conditionId: string): string {
 		return conditionId.startsWith("0x") ? conditionId : `0x${conditionId}`;
 	}
 
 	/**
-	 * Redeem resolved positions
-	 * Claims winnings from markets that have been resolved
+	 * Redeem resolved positions.
+	 * Claims winnings from markets that have been settled.
 	 */
 	async redeemPositions(params: RedeemParams): Promise<RedeemResult> {
 		const { conditionId, tokenId, outcomeIndex, negRisk = false } = params;
@@ -171,7 +243,7 @@ export class PolymarketRedemption {
 					return {
 						success: false,
 						error:
-							"No CTF tokens to redeem. Balance is 0 - position may have already been redeemed.",
+							"No CTF tokens to redeem. Balance is 0 — position may have already been redeemed.",
 					};
 				}
 				console.log(`Token balance: ${tokenBalance.toString()}`);
@@ -186,19 +258,18 @@ export class PolymarketRedemption {
 				};
 			}
 
-			let tx: providers.TransactionResponse;
+			let calldata: string;
+			let targetAddress: string;
 
 			if (negRisk) {
 				// For negative risk markets, use NegRiskAdapter
 				if (tokenBalance === 0n) {
 					return {
 						success: false,
-						error:
-							"No tokens to redeem - tokenId is required for negRisk markets",
+						error: "No tokens to redeem — tokenId is required for negRisk markets",
 					};
 				}
 
-				// Check if NegRiskAdapter is approved
 				const adapterApproved = await this.isNegRiskAdapterApproved();
 				if (!adapterApproved) {
 					return {
@@ -208,15 +279,12 @@ export class PolymarketRedemption {
 					};
 				}
 
-				// Determine amounts array based on which outcome the user holds
-				// amounts[0] = outcome 0 (Yes) tokens, amounts[1] = outcome 1 (No) tokens
 				let amounts: [bigint, bigint];
 				if (outcomeIndex === 0) {
 					amounts = [tokenBalance, 0n];
 				} else if (outcomeIndex === 1) {
 					amounts = [0n, tokenBalance];
 				} else {
-					// Unknown outcome - try Yes first (legacy behavior)
 					amounts = [tokenBalance, 0n];
 				}
 
@@ -225,15 +293,14 @@ export class PolymarketRedemption {
 				console.log(`  Amounts: [${amounts[0]}, ${amounts[1]}]`);
 
 				const negRiskAdapter = this.getNegRiskAdapterContract();
-				tx = await negRiskAdapter.redeemPositions(conditionIdBytes32, amounts, {
-					gasLimit: 300_000,
-					maxFeePerGas: utils.parseUnits("250", "gwei"),
-					maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
-				});
+				calldata = negRiskAdapter.interface.encodeFunctionData(
+					"redeemPositions",
+					[conditionIdBytes32, amounts],
+				);
+				targetAddress = POLYGON_ADDRESSES.NEG_RISK_ADAPTER_ADDRESS;
 			} else {
 				// For regular CTF markets
-				const winningIndexSets =
-					await this.getWinningIndexSets(conditionIdBytes32);
+				const winningIndexSets = await this.getWinningIndexSets(conditionIdBytes32);
 
 				if (winningIndexSets.length === 0) {
 					return {
@@ -247,22 +314,18 @@ export class PolymarketRedemption {
 				console.log(`  Winning index sets: [${winningIndexSets.join(", ")}]`);
 
 				const ctf = this.getCtfContract();
-				tx = await ctf.redeemPositions(
+				calldata = ctf.interface.encodeFunctionData("redeemPositions", [
 					POLYGON_ADDRESSES.USDC_ADDRESS,
 					PARENT_COLLECTION_ID,
 					conditionIdBytes32,
 					winningIndexSets,
-					{
-						gasLimit: 300_000,
-						maxFeePerGas: utils.parseUnits("250", "gwei"),
-						maxPriorityFeePerGas: utils.parseUnits("50", "gwei"),
-					},
-				);
+				]);
+				targetAddress = POLYGON_ADDRESSES.CTF_ADDRESS;
 			}
 
+			const tx = await this.sendTx(targetAddress, calldata);
 			console.log(`Transaction submitted: ${tx.hash}`);
 
-			// Wait for confirmation
 			const receipt = await tx.wait(1);
 
 			if (receipt.status === 0) {
@@ -292,7 +355,7 @@ export class PolymarketRedemption {
 let redemptionInstance: PolymarketRedemption | null = null;
 
 /**
- * Get or create the redemption service instance
+ * Get or create the redemption service instance.
  */
 export function getRedemptionInstance(): PolymarketRedemption {
 	if (!redemptionInstance) {
